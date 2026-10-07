@@ -1,0 +1,11 @@
+node_modules/
+server/dist/
+web/dist/
+worker/dist/
+.wrangler/
+.dev.vars
+data/
+.mimosa/
+*.log
+.DS_Store
+.env

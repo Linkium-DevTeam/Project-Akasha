@@ -1,0 +1,29 @@
+{
+  "name": "project-akasha",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Project Akasha · 虚实共生的二次元实体收藏收纳系统（Cloudflare Serverless）",
+  "workspaces": [
+    "worker",
+    "web"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "npm run build -w web && concurrently -n worker,web -c yellow,cyan \"npm:dev -w worker\" \"npm:dev -w web\"",
+    "build": "npm run build -w web",
+    "deploy": "npm run build && npm run deploy -w worker",
+    "typecheck": "npm run typecheck -w worker && npm run typecheck -w web",
+    "db:migrate:local": "npm run db:migrate:local -w worker",
+    "db:migrate:remote": "npm run db:migrate:remote -w worker",
+    "cf:setup": "node scripts/cf-setup.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
+  "allowScripts": {
+    "esbuild@*": true,
+    "workerd@*": true
+  }
+}

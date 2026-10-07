@@ -1,0 +1,15 @@
+{
+  "name": "Project Akasha · 虚实收纳",
+  "short_name": "Akasha",
+  "description": "为二次元实体收藏打造的虚实共生收纳系统",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#eef3ff",
+  "theme_color": "#5f78f0",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
