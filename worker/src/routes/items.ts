@@ -1,5 +1,4 @@
-import { Hono } from 'hono';
-import type { Env } from '../env.js';
+import { Hono, type Context } from 'hono';
 import { one, query } from '../db.js';
 import { requireWriteAuth } from '../auth.js';
 import { createItem, updateItem, deleteItem, type ItemInput } from '../services.js';
@@ -10,42 +9,75 @@ export interface ItemRow {
   barcode: string; tags: string; box_id: number | null; created_at: string; updated_at: string;
 }
 
-export function serializeItem(item: ItemRow, images: any[], box: any) {
+interface ImageRow {
+  id: number; item_id: number | null; file: string; thumb: string;
+  width: number; height: number; palette: string; sort: number; created_at: string;
+}
+
+interface BoxBriefRow { id: number; code: string; name: string; location: string; color: string }
+
+function serializeImage(img: ImageRow) {
+  return {
+    id: img.id,
+    url: `/images/${img.file}`,
+    thumbUrl: `/images/${img.thumb}`,
+    width: img.width,
+    height: img.height,
+    palette: JSON.parse(img.palette || '[]') as string[],
+  };
+}
+
+function serializeItem(item: ItemRow, images: ImageRow[], box: BoxBriefRow | null) {
   return {
     id: item.id, name: item.name, series: item.series, character: item.character,
     type: item.type, status: item.status, condition: item.condition,
     price: item.price, currency: item.currency,
     purchasedAt: item.purchased_at, notes: item.notes, barcode: item.barcode,
     tags: item.tags ? item.tags.split(',').filter(Boolean) : [],
-    boxId: item.box_id, box, images, createdAt: item.created_at, updatedAt: item.updated_at,
+    boxId: item.box_id, box, images: images.map(serializeImage),
+    createdAt: item.created_at, updatedAt: item.updated_at,
   };
 }
 
-async function loadImages(db: D1Database, itemId: number) {
-  const rows = await query<any>(db, 'SELECT * FROM images WHERE item_id = ? ORDER BY sort ASC, id ASC', itemId);
-  return rows.map((img) => ({
-    id: img.id,
-    url: `/images/${img.file}`,
-    thumbUrl: `/images/${img.thumb}`,
-    width: img.width,
-    height: img.height,
-    palette: JSON.parse(img.palette || '[]'),
-  }));
+/** 批量取图片与盒子摘要，避免逐行 N+1 查询 */
+async function attachImagesAndBoxes(db: D1Database, items: ItemRow[]) {
+  const itemIds = items.map((i) => i.id);
+  const boxIds = [...new Set(items.map((i) => i.box_id).filter((v): v is number => v != null))];
+  if (itemIds.length === 0) return [];
+
+  const ph = (n: number) => n > 0 ? `(${Array.from({ length: n }, () => '?').join(',')})` : '(NULL)';
+  const [imageRows, boxRows] = await Promise.all([
+    itemIds.length
+      ? query<ImageRow>(db, `SELECT * FROM images WHERE item_id IN ${ph(itemIds.length)} ORDER BY sort ASC, id ASC`, ...itemIds)
+      : Promise.resolve([] as ImageRow[]),
+    boxIds.length
+      ? query<BoxBriefRow>(db, `SELECT id, code, name, location, color FROM boxes WHERE id IN ${ph(boxIds.length)}`, ...boxIds)
+      : Promise.resolve([] as BoxBriefRow[]),
+  ]);
+
+  const imagesByItem = new Map<number, ImageRow[]>();
+  for (const img of imageRows) {
+    const list = imagesByItem.get(img.item_id!) ?? [];
+    list.push(img);
+    imagesByItem.set(img.item_id!, list);
+  }
+  const boxesById = new Map(boxRows.map((b) => [b.id, b]));
+
+  return items.map((item) =>
+    serializeItem(item, imagesByItem.get(item.id) ?? [], item.box_id ? boxesById.get(item.box_id) ?? null : null),
+  );
 }
 
-async function fullItem(env: Env, id: number) {
+async function fullItem(env: { DB: D1Database }, id: number) {
   const item = await one<ItemRow>(env.DB, 'SELECT * FROM items WHERE id = ?', id);
   if (!item) return undefined;
-  const [images, box] = await Promise.all([
-    loadImages(env.DB, id),
-    item.box_id
-      ? one(env.DB, 'SELECT id, code, name, location, color FROM boxes WHERE id = ?', item.box_id)
-      : Promise.resolve(null),
-  ]);
-  return serializeItem(item, images, box);
+  const [attached] = await attachImagesAndBoxes(env.DB, [item]);
+  return attached;
 }
 
-const parseItemInput = async (c: any): Promise<ItemInput> => {
+type Ctx = Context<{ Bindings: Env }>;
+
+const parseItemInput = async (c: Ctx): Promise<ItemInput> => {
   const b = await c.req.json();
   return {
     name: String(b.name ?? '').trim(),
@@ -91,17 +123,7 @@ itemsRoutes.get('/', async (c) => {
   const sql = `SELECT * FROM items ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
     ORDER BY ${sort === 'price' ? `(price IS NULL), price ${order}` : `created_at ${order}, id ${order}`} LIMIT 500`;
   const rows = await query<ItemRow>(c.env.DB, sql, ...params);
-
-  const items = await Promise.all(rows.map(async (item) => {
-    const [images, box] = await Promise.all([
-      loadImages(c.env.DB, item.id),
-      item.box_id
-        ? one(c.env.DB, 'SELECT id, code, name, location, color FROM boxes WHERE id = ?', item.box_id)
-        : Promise.resolve(null),
-    ]);
-    return serializeItem(item, images, box);
-  }));
-  return c.json({ items });
+  return c.json({ items: await attachImagesAndBoxes(c.env.DB, rows) });
 });
 
 itemsRoutes.get('/:id', async (c) => {

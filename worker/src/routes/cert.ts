@@ -2,7 +2,6 @@ import { Hono } from 'hono';
 import { verifyChain } from '../chain.js';
 import { sha256 } from '../sha256.js';
 import { one, query } from '../db.js';
-import type { Env } from '../env.js';
 
 // 链账本：/api/chain、/api/chain/verify
 export const chainRoutes = new Hono<{ Bindings: Env }>();

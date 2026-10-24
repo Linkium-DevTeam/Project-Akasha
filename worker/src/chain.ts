@@ -1,6 +1,5 @@
 import { now } from './db.js';
 import { sha256 } from './sha256.js';
-import type { Env } from './env.js';
 
 export interface Block {
   id: number;
@@ -57,7 +56,7 @@ export async function appendBlock(env: Env, action: string, itemId: number | nul
   };
 }
 
-/** 创世区块：首次使用时写入（幂等） */
+/** 创世区块：首次使用时写入（幂等；0002 迁移的唯一索引兜底多 isolate 并发竞态） */
 export async function ensureGenesis(env: Env) {
   const exists = await env.DB.prepare('SELECT id FROM blocks LIMIT 1').first();
   if (exists) return;
@@ -65,9 +64,13 @@ export async function ensureGenesis(env: Env) {
   const payload = JSON.stringify({ born: ts, message: 'Akasha Void Archive — 从虚无中诞生的第一块记忆晶石' });
   const difficulty = difficultyOf(env);
   const { hash, nonce } = mine('0'.repeat(64), null, 'GENESIS', payload, ts, difficulty);
-  await env.DB.prepare(
-    'INSERT INTO blocks (item_id, action, payload, prev_hash, hash, nonce, difficulty, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-  ).bind(null, 'GENESIS', payload, '0'.repeat(64), hash, nonce, difficulty, ts).run();
+  try {
+    await env.DB.prepare(
+      'INSERT INTO blocks (item_id, action, payload, prev_hash, hash, nonce, difficulty, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+    ).bind(null, 'GENESIS', payload, '0'.repeat(64), hash, nonce, difficulty, ts).run();
+  } catch {
+    // 另一个 isolate 抢先写入：唯一索引拒绝，视为已完成
+  }
 }
 
 export async function verifyChain(env: Env): Promise<{ valid: boolean; count: number; brokenAt: number | null }> {

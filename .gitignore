@@ -2,6 +2,7 @@ node_modules/
 server/dist/
 web/dist/
 worker/dist/
+worker/worker-configuration.d.ts
 .wrangler/
 .dev.vars
 data/

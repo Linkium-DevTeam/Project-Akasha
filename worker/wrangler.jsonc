@@ -2,15 +2,24 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "project-akasha",
   "main": "src/index.ts",
-  "compatibility_date": "2026-09-15",
+  "compatibility_date": "2026-10-08",
+  // 保留 workers.dev 作为备用入口（配 routes 后默认会被禁用）
+  "workers_dev": true,
   "observability": {
-    "enabled": true
+    "enabled": true,
+    "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": true },
+    "traces": { "enabled": true, "head_sampling_rate": 0.05 },
+    "redact_query_string": true
   },
   "assets": {
     "directory": "../web/dist",
     "binding": "ASSETS",
     "run_worker_first": ["/api/*", "/images/*"]
   },
+  // 自定义域名：deploy 时自动创建 DNS 记录（proxied）并签发边缘证书
+  "routes": [
+    { "pattern": "akasha.linkium.top", "custom_domain": true }
+  ],
   "vars": {
     "CHAIN_DIFFICULTY": "2",
     "AUTH_TOKEN": ""

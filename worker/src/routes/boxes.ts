@@ -1,16 +1,38 @@
-import { Hono } from 'hono';
-import type { Env } from '../env.js';
+import { Hono, type Context } from 'hono';
 import { one, query, run } from '../db.js';
 import { requireWriteAuth } from '../auth.js';
-import { createBox, type BoxInput } from '../services.js';
+import { createBox, BoxCodeError, type BoxInput } from '../services.js';
 
 export interface BoxRow {
   id: number; code: string; name: string; location: string; capacity: number;
   color: string; secret: string; created_at: string;
 }
 
-export async function serializeBox(db: D1Database, box: BoxRow, opts: { reveal?: boolean; withItems?: boolean } = {}) {
-  const count = (await one<{ c: number }>(db, 'SELECT COUNT(*) AS c FROM items WHERE box_id = ?', box.id))!.c;
+/** 批量统计各盒子藏品数（D1 batch 单次往返，每条均为静态参数化 SQL） */
+async function countsByBoxId(db: D1Database, boxIds: number[]): Promise<Map<number, number>> {
+  const map = new Map<number, number>();
+  if (boxIds.length === 0) return map;
+  const stmts = boxIds.map((id) =>
+    db.prepare('SELECT COUNT(*) AS c FROM items WHERE box_id = ?').bind(id),
+  );
+  const results = await db.batch(stmts);
+  boxIds.forEach((id, i) => {
+    const row = results[i]?.results[0] as { c: number } | undefined;
+    map.set(id, row?.c ?? 0);
+  });
+  return map;
+}
+
+export async function serializeBox(
+  db: D1Database, box: BoxRow,
+  opts: { reveal?: boolean; withItems?: boolean; counts?: Map<number, number> } = {},
+) {
+  let count: number;
+  if (opts.counts) {
+    count = opts.counts.get(box.id) ?? 0;
+  } else {
+    count = (await one<{ c: number }>(db, 'SELECT COUNT(*) AS c FROM items WHERE box_id = ?', box.id))!.c;
+  }
   const base: Record<string, unknown> = {
     id: box.id, code: box.code, name: box.name, location: box.location,
     capacity: box.capacity, color: box.color, count,
@@ -24,10 +46,14 @@ export async function serializeBox(db: D1Database, box: BoxRow, opts: { reveal?:
   return base;
 }
 
-const parseBoxInput = async (c: any): Promise<BoxInput> => {
+type Ctx = Context<{ Bindings: Env }>;
+
+const parseBoxInput = async (c: Ctx): Promise<BoxInput> => {
   const b = await c.req.json();
   return {
     name: String(b.name ?? '').trim(),
+    // 仅创建时生效；PATCH 不改盒码（避免已贴二维码 / NFC 标签失效）
+    code: String(b.code ?? ''),
     location: String(b.location ?? '').trim(),
     capacity: Number(b.capacity ?? 0),
     color: String(b.color ?? '#5f78f0'),
@@ -39,7 +65,9 @@ export const boxesRoutes = new Hono<{ Bindings: Env }>();
 
 boxesRoutes.get('/', async (c) => {
   const rows = await query<BoxRow>(c.env.DB, 'SELECT * FROM boxes ORDER BY created_at DESC, id DESC');
-  return c.json({ boxes: await Promise.all(rows.map((b) => serializeBox(c.env.DB, b))) });
+  const counts = await countsByBoxId(c.env.DB, rows.map((b) => b.id));
+  const boxes = await Promise.all(rows.map((b) => serializeBox(c.env.DB, b, { counts })));
+  return c.json({ boxes });
 });
 
 boxesRoutes.get('/:id', async (c) => {
@@ -52,8 +80,13 @@ boxesRoutes.get('/:id', async (c) => {
 boxesRoutes.post('/', requireWriteAuth, async (c) => {
   const input = await parseBoxInput(c);
   if (!input.name) return c.json({ error: '名称不能为空' }, 400);
-  const box = await createBox(c.env, input);
-  return c.json({ box: await serializeBox(c.env.DB, box as BoxRow) }, 201);
+  try {
+    const box = await createBox(c.env, input);
+    return c.json({ box: await serializeBox(c.env.DB, box as BoxRow) }, 201);
+  } catch (e) {
+    if (e instanceof BoxCodeError) return c.json({ error: e.message }, e.status);
+    throw e;
+  }
 });
 
 boxesRoutes.patch('/:id', requireWriteAuth, async (c) => {

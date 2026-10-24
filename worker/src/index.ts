@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
-import { logger } from 'hono/logger';
-import type { Env } from './env.js';
+import type { ErrorHandler, MiddlewareHandler } from 'hono';
 import { ensureGenesis } from './chain.js';
 import { itemsRoutes } from './routes/items.js';
 import { boxesRoutes } from './routes/boxes.js';
@@ -9,9 +8,32 @@ import { certRoutes, chainRoutes } from './routes/cert.js';
 
 const app = new Hono<{ Bindings: Env }>();
 
-app.use(logger());
+/** 结构化 JSON 请求日志（Workers Logs 可检索） */
+export const jsonLogger: MiddlewareHandler = async (c, next) => {
+  const start = Date.now();
+  await next();
+  console.log(JSON.stringify({
+    message: 'request',
+    method: c.req.method,
+    path: c.req.path,
+    status: c.res.status,
+    ms: Date.now() - start,
+  }));
+};
 
-// 创世区块懒初始化：每个 isolate 只做一次检查
+const onError: ErrorHandler = (err, c) => {
+  console.error(JSON.stringify({
+    message: 'unhandled error',
+    error: err instanceof Error ? err.message : String(err),
+    path: c.req.path,
+  }));
+  return c.json({ error: '服务器内部错误' }, 500);
+};
+app.onError(onError);
+
+app.use(jsonLogger);
+
+// 创世区块懒初始化：每个 isolate 只做一次检查（latch 缓存的是全局不变量，非请求态数据）
 let genesisChecked = false;
 app.use('/api/*', async (c, next) => {
   if (!genesisChecked) {
@@ -23,7 +45,7 @@ app.use('/api/*', async (c, next) => {
 
 app.get('/api/health', (c) => c.json({ ok: true, service: 'akasha', runtime: 'cloudflare-workers', time: new Date().toISOString() }));
 
-const api = new Hono<{ Bindings: Env }>();
+const api = new Hono();
 api.route('/items', itemsRoutes);
 api.route('/boxes', boxesRoutes);
 api.route('/cert', certRoutes);

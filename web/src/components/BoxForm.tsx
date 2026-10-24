@@ -10,18 +10,22 @@ export default function BoxForm({ open, onClose, initial }: { open: boolean; onC
   const editing = !!initial?.id;
   const qc = useQueryClient();
   const toast = useToast();
-  const [form, setForm] = useState({ name: '', location: '', capacity: 24, color: COLORS[0], secret: '' });
+  const [form, setForm] = useState({ code: '', name: '', location: '', capacity: 24, color: COLORS[0], secret: '' });
 
   useEffect(() => {
     if (open) {
       setForm(initial
-        ? { name: initial.name, location: initial.location, capacity: initial.capacity, color: initial.color || COLORS[0], secret: initial.secret ?? '' }
-        : { name: '', location: '', capacity: 24, color: COLORS[Math.floor(Math.random() * COLORS.length)], secret: '' });
+        ? { code: initial.code, name: initial.name, location: initial.location, capacity: initial.capacity, color: initial.color || COLORS[0], secret: initial.secret ?? '' }
+        : { code: '', name: '', location: '', capacity: 24, color: COLORS[Math.floor(Math.random() * COLORS.length)], secret: '' });
     }
   }, [open, initial]);
 
   const save = useMutation({
-    mutationFn: () => (editing ? api.boxes.update(initial!.id, form) : api.boxes.create(form)),
+    mutationFn: () => {
+      // 编辑时不提交盒码（服务端也会忽略）：改动盒码会让已贴的二维码 / NFC 标签失效
+      const body = editing ? { ...form, code: undefined } : form;
+      return editing ? api.boxes.update(initial!.id, body) : api.boxes.create(body);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['boxes'] });
       qc.invalidateQueries({ queryKey: ['box'] });
@@ -39,6 +43,23 @@ export default function BoxForm({ open, onClose, initial }: { open: boolean; onC
         <Field label="名称 *">
           <input required autoFocus className={inputCls} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="例：吧唧专列一号" />
         </Field>
+
+        <Field label="盒码" hint={editing ? '创建后不可修改' : '可选 · 留空自动生成'}>
+          <input
+            className={`${inputCls} font-mono uppercase tracking-widest`}
+            value={form.code}
+            onChange={(e) => set('code', e.target.value.toUpperCase())}
+            placeholder={editing ? initial!.code : '已有 JLC 盒？直接录入，如 JLC-0001'}
+            maxLength={16}
+            disabled={editing}
+          />
+          <p className="mt-1 text-[10px] leading-relaxed text-ink-400">
+            {editing
+              ? '盒码锁定中：修改会让已贴的二维码贴纸和 NFC 标签全部失效。'
+              : '2-16 位字母 / 数字 / 连字符；留空则自动生成 AKS-XXXX。'}
+          </p>
+        </Field>
+
         <Field label="存放位置">
           <input className={inputCls} value={form.location} onChange={(e) => set('location', e.target.value)} placeholder="书架 A · 第 2 层" />
         </Field>

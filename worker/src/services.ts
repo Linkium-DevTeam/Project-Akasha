@@ -1,6 +1,5 @@
 import { appendBlock } from './chain.js';
 import { now } from './db.js';
-import type { Env } from './env.js';
 
 export interface ItemInput {
   name: string;
@@ -21,10 +20,24 @@ export interface ItemInput {
 
 export interface BoxInput {
   name: string;
+  /** 可选：录入已有盒码；留空则自动生成 AKS-XXXX */
+  code?: string;
   location?: string;
   capacity?: number;
   color?: string;
   secret?: string;
+}
+
+/** 自定义盒码规则：2-16 位字母 / 数字 / 连字符，入库前统一大写 */
+const CUSTOM_CODE_RE = /^[A-Z0-9-]{2,16}$/;
+
+/** 盒码不可用（格式错误或已被占用） */
+export class BoxCodeError extends Error {
+  status: 400 | 409;
+  constructor(message: string, status: 400 | 409 = 400) {
+    super(message);
+    this.status = status;
+  }
 }
 
 const BOX_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
@@ -32,8 +45,8 @@ const BOX_ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
 export async function generateBoxCode(db: D1Database): Promise<string> {
   let code: string;
   do {
-    code = 'AKS-' + Array.from({ length: 4 }, () =>
-      BOX_ALPHABET[Math.floor(Math.random() * BOX_ALPHABET.length)]).join('');
+    const bytes = crypto.getRandomValues(new Uint8Array(4));
+    code = 'AKS-' + [...bytes].map((b) => BOX_ALPHABET[b % BOX_ALPHABET.length]).join('');
   } while (await db.prepare('SELECT id FROM boxes WHERE code = ?').bind(code).first());
   return code;
 }
@@ -131,7 +144,18 @@ export async function deleteItem(env: Env, id: number): Promise<boolean> {
 }
 
 export async function createBox(env: Env, input: BoxInput): Promise<Record<string, any>> {
-  const code = await generateBoxCode(env.DB);
+  // 已有盒码优先：手动录入统一大写并查重；留空走自动生成
+  let code = (input.code ?? '').trim().toUpperCase();
+  if (code) {
+    if (!CUSTOM_CODE_RE.test(code)) {
+      throw new BoxCodeError('盒码格式无效：2-16 位字母、数字或连字符', 400);
+    }
+    if (await env.DB.prepare('SELECT id FROM boxes WHERE code = ?').bind(code).first()) {
+      throw new BoxCodeError(`盒码 ${code} 已被占用`, 409);
+    }
+  } else {
+    code = await generateBoxCode(env.DB);
+  }
   const res = await env.DB.prepare(
     'INSERT INTO boxes (code, name, location, capacity, color, secret, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
   ).bind(

@@ -1,5 +1,4 @@
 import { Hono } from 'hono';
-import type { Env } from '../env.js';
 import { one, query, run } from '../db.js';
 import { requireWriteAuth } from '../auth.js';
 
@@ -52,10 +51,10 @@ miscRoutes.post('/upload', requireWriteAuth, async (c) => {
     const key = `img_${Date.now().toString(36)}${randomKey()}.${ext}`;
     const thumbKey = `thumb_${key.replace(/^img_/, '')}`;
 
-    const [fullBuf, thumbBuf] = await Promise.all([full.arrayBuffer(), thumb.arrayBuffer()]);
+    // File 本身是合法的 R2PutValue：直传流式内容，不在 isolate 里整块缓冲
     await Promise.all([
-      c.env.BUCKET.put(key, fullBuf, { httpMetadata: { contentType: full.type } }),
-      c.env.BUCKET.put(thumbKey, thumbBuf, { httpMetadata: { contentType: full.type } }),
+      c.env.BUCKET.put(key, full, { httpMetadata: { contentType: full.type } }),
+      c.env.BUCKET.put(thumbKey, thumb, { httpMetadata: { contentType: thumb.type } }),
     ]);
 
     const { lastInsertRowid } = await run(

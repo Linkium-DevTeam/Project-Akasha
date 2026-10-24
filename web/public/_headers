@@ -1,0 +1,8 @@
+# Project Akasha · 静态资源安全响应头
+# Workers Static Assets 原生支持 Pages 风格的 _headers 文件
+/*
+
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+  Permissions-Policy: camera=(self), microphone=(), geolocation=()
