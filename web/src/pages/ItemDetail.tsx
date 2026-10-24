@@ -3,13 +3,14 @@ import type React from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence } from 'framer-motion';
-import { BadgeCheck, Boxes, Gem, MapPin, Pencil, Package, ScrollText, Trash2 } from 'lucide-react';
+import { BadgeCheck, Boxes, ChevronLeft, ChevronRight, Gem, MapPin, Pencil, Package, Scissors, ScrollText, Trash2 } from 'lucide-react';
 import { api } from '../api';
 import { fmtDate, fmtMoney, fmtTime, shortHash } from '../hooks';
 import { ACTION_LABEL, CONDITION_LABEL, STATUS_LABEL, TYPE_LABEL } from '../types';
 import ParallaxImage from '../components/ParallaxImage';
 import ItemForm, { type ItemFormInitial } from '../components/ItemForm';
 import { EmptyState, Spinner, Tag, useToast } from '../components/ui';
+import { cutoutAndUpload } from '../lib/cutout';
 
 export default function ItemDetail() {
   const { id } = useParams();
@@ -17,6 +18,7 @@ export default function ItemDetail() {
   const qc = useQueryClient();
   const toast = useToast();
   const [formOpen, setFormOpen] = useState(false);
+  const [active, setActive] = useState(0);
 
   const query = useQuery({ queryKey: ['item', id], queryFn: () => api.items.get(id!) });
 
@@ -30,13 +32,32 @@ export default function ItemDetail() {
     onError: (e: Error) => toast(e.message, 'err'),
   });
 
+  const cutout = useMutation({
+    mutationFn: async (idx: number) => {
+      const item = query.data!.item;
+      const img = item.images[idx];
+      const blob = await (await fetch(img.url)).blob();
+      const res = await cutoutAndUpload(blob, item.images.length);
+      const ids = [...item.images.map((i) => i.id), ...res.images.map((i) => i.id)];
+      return api.items.update(item.id, { ...item, tags: item.tags, imageIds: ids, price: item.price });
+    },
+    onSuccess: (res) => {
+      qc.invalidateQueries({ queryKey: ['item', id] });
+      qc.invalidateQueries({ queryKey: ['items'] });
+      toast('抠图完成，已作为新图加入（原图保留，可在编辑中删除）', 'ok');
+      setActive((res.item.images?.length ?? 1) - 1);
+    },
+    onError: (e: Error) => toast(e.message, 'err'),
+  });
+
   if (query.isLoading) return <div className="flex justify-center py-24"><Spinner className="size-8" /></div>;
   if (query.isError || !query.data?.item) {
     return <EmptyState icon={<Gem size={26} />} title="找不到这件藏品" hint={query.isError ? String(query.error) : '可能已被注销。'} />;
   }
 
   const item = query.data.item;
-  const img = item.images[0];
+  const images = item.images;
+  const img = images[Math.min(active, Math.max(0, images.length - 1))];
   const accent = img?.palette?.[0] ?? '#5f78f0';
   const formInitial: ItemFormInitial = { ...item, tags: item.tags };
 
@@ -66,18 +87,70 @@ export default function ItemDetail() {
       </div>
 
       <div className="grid gap-5 lg:grid-cols-2">
-        {/* 左：视差挂件 */}
+        {/* 左：多图画廊 + 视差挂件 */}
         <div className="glass overflow-hidden rounded-3xl">
-          {img ? (
-            <ParallaxImage
-              src={img.url}
-              alt={item.name}
-              accent={accent}
-              badges={[TYPE_LABEL[item.type], STATUS_LABEL[item.status]]}
-            />
-          ) : (
-            <div className="flex h-72 items-center justify-center text-6xl">💠</div>
+          <div className="relative">
+            {images.length > 1 && (
+              <>
+                <button
+                  onClick={() => setActive((a) => (a - 1 + images.length) % images.length)}
+                  aria-label="上一张"
+                  className="glass absolute left-3 top-1/2 z-10 -translate-y-1/2 rounded-full p-2 text-ink-600 transition hover:text-aether-700"
+                ><ChevronLeft size={17} /></button>
+                <button
+                  onClick={() => setActive((a) => (a + 1) % images.length)}
+                  aria-label="下一张"
+                  className="glass absolute right-3 top-1/2 z-10 -translate-y-1/2 rounded-full p-2 text-ink-600 transition hover:text-aether-700"
+                ><ChevronRight size={17} /></button>
+                <span className="glass absolute right-4 top-4 z-10 rounded-full px-2.5 py-1 text-[11px] font-bold text-ink-600">
+                  {Math.min(active, images.length - 1) + 1} / {images.length}
+                </span>
+              </>
+            )}
+            {img ? (
+              <ParallaxImage
+                key={img.id}
+                src={img.url}
+                alt={item.name}
+                accent={accent}
+                badges={[TYPE_LABEL[item.type], STATUS_LABEL[item.status]]}
+              />
+            ) : (
+              <div className="flex h-72 items-center justify-center text-6xl">💠</div>
+            )}
+            {img && (
+              <button
+                onClick={() => cutout.mutate(Math.min(active, images.length - 1))}
+                disabled={cutout.isPending}
+                title="智能抠图（保留原图，结果作为新图加入）"
+                className="glass absolute bottom-4 right-4 z-10 flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold text-ink-600 transition hover:text-aether-700 disabled:opacity-50"
+              >
+                {cutout.isPending ? <Spinner className="size-3.5" /> : <Scissors size={13} />}
+                {cutout.isPending ? '抠图中…' : 'AI 抠图'}
+              </button>
+            )}
+          </div>
+
+          {/* 缩略图条 */}
+          {images.length > 1 && (
+            <div className="hide-scrollbar flex gap-2 overflow-x-auto border-t border-white/50 px-4 py-3">
+              {images.map((im, i) => (
+                <button
+                  key={im.id}
+                  onClick={() => setActive(i)}
+                  className={`relative size-16 shrink-0 overflow-hidden rounded-xl ring-2 transition ${
+                    i === Math.min(active, images.length - 1) ? 'ring-aether-500' : 'ring-white/60 hover:ring-aether-300'
+                  }`}
+                >
+                  <img src={im.thumbUrl} alt="" className="size-full object-cover" loading="lazy" />
+                  {im.url.includes('cutout') && (
+                    <span className="absolute bottom-0.5 right-0.5 rounded bg-black/60 px-1 text-[8px] font-bold text-white">抠图</span>
+                  )}
+                </button>
+              ))}
+            </div>
           )}
+
           {img && img.palette.length > 0 && (
             <div className="flex items-center gap-2 border-t border-white/50 px-4 py-3">
               <span className="text-[10px] font-bold text-ink-400">MATERIAL PALETTE</span>

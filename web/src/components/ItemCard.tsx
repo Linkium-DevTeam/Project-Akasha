@@ -39,6 +39,11 @@ export default function ItemCard({ item, index = 0 }: { item: Item; index?: numb
               {STATUS_LABEL[item.status]}
             </span>
           )}
+          {item.images.length > 1 && (
+            <span className="absolute right-2.5 top-2.5 rounded-full bg-black/45 px-2 py-0.5 text-[10px] font-bold text-white backdrop-blur">
+              1/{item.images.length}
+            </span>
+          )}
           {palette.length > 0 && (
             <div className="absolute bottom-2.5 right-2.5 flex gap-1">
               {palette.slice(0, 4).map((c, i) => (

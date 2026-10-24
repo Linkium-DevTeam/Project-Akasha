@@ -9,6 +9,7 @@ import BoxDetail from './pages/BoxDetail';
 import BoxByCode from './pages/BoxByCode';
 import Certificate from './pages/Certificate';
 import ChainPage from './pages/ChainPage';
+import Insights from './pages/Insights';
 
 // ZXing 扫码库体积大，仅透镜页需要 —— 单独分包，按需加载
 const Lens = lazy(() => import('./pages/Lens'));
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="/lens" element={<Suspense fallback={<div className="flex justify-center py-24"><Spinner className="size-8" /></div>}><Lens /></Suspense>} />
           <Route path="/cert/:itemId" element={<Certificate />} />
           <Route path="/chain" element={<ChainPage />} />
+          <Route path="/insights" element={<Insights />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Route>
       </Routes>

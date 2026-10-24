@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { one, query } from '../db.js';
-import { requireWriteAuth } from '../auth.js';
+import { writeGate } from '../gate.js';
 import { createItem, updateItem, deleteItem, type ItemInput } from '../services.js';
 
 export interface ItemRow {
@@ -99,6 +99,9 @@ const parseItemInput = async (c: Ctx): Promise<ItemInput> => {
 
 export const itemsRoutes = new Hono<{ Bindings: Env }>();
 
+// 写操作只允许经 /api/write/* 通道（受 Cloudflare Access 保护）
+itemsRoutes.use('*', writeGate);
+
 itemsRoutes.get('/', async (c) => {
   const q = (c.req.query('q') ?? '').trim();
   const type = c.req.query('type') ?? '';
@@ -135,14 +138,14 @@ itemsRoutes.get('/:id', async (c) => {
   return c.json({ item: { ...item, history } });
 });
 
-itemsRoutes.post('/', requireWriteAuth, async (c) => {
+itemsRoutes.post('/', async (c) => {
   const input = await parseItemInput(c);
   if (!input.name) return c.json({ error: '名称不能为空' }, 400);
   const item = await createItem(c.env, input);
   return c.json({ item: await fullItem(c.env, item.id) }, 201);
 });
 
-itemsRoutes.patch('/:id', requireWriteAuth, async (c) => {
+itemsRoutes.patch('/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const input = await parseItemInput(c);
   if (!input.name) return c.json({ error: '名称不能为空' }, 400);
@@ -151,7 +154,7 @@ itemsRoutes.patch('/:id', requireWriteAuth, async (c) => {
   return c.json({ item: await fullItem(c.env, id) });
 });
 
-itemsRoutes.delete('/:id', requireWriteAuth, async (c) => {
+itemsRoutes.delete('/:id', async (c) => {
   const ok = await deleteItem(c.env, Number(c.req.param('id')));
   if (!ok) return c.json({ error: '藏品不存在' }, 404);
   await c.env.DB.prepare('DELETE FROM images WHERE item_id IS NULL').run();

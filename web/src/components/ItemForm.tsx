@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ImagePlus, Loader2, X } from 'lucide-react';
+import { Check, ImagePlus, Loader2, Sparkles, Wand2, X } from 'lucide-react';
 import { api } from '../api';
 import type { Item, ItemCondition, ItemStatus, ItemType } from '../types';
 import { CONDITION_LABEL, STATUS_LABEL, TYPE_LABEL } from '../types';
 import { Modal, Field, inputCls, useToast } from './ui';
+
+const FIELD_LABELS: Record<string, string> = {
+  name: '名称', series: '系列 / 作品', character: '角色', type: '类型', tags: '标签', notes: '备注',
+};
 
 export interface ItemFormInitial {
   id?: number;
@@ -23,11 +27,15 @@ export default function ItemForm({ open, onClose, initial }: { open: boolean; on
   const [form, setForm] = useState<ItemFormInitial>({});
   const [uploaded, setUploaded] = useState<Item['images']>([]);
   const [uploading, setUploading] = useState(false);
+  const [aiBusy, setAiBusy] = useState<'identify' | 'enrich' | null>(null);
+  const [aiResult, setAiResult] = useState<{ suggestion: Record<string, any>; sources?: Array<{ name: string; nameCn: string; date: string; summary: string }> } | null>(null);
+  const [aiChecks, setAiChecks] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (open) {
       setForm(initial ?? { type: 'badge', status: 'owned', condition: 'mint' });
       setUploaded(initial?.images ?? []);
+      setAiResult(null);
     }
   }, [open, initial]);
 
@@ -70,12 +78,136 @@ export default function ItemForm({ open, onClose, initial }: { open: boolean; on
     upload.mutate(Array.from(list).slice(0, 9));
   };
 
+  /* ---------- AI 助手：识别 / 联网补全（结果一律先审核再应用） ---------- */
+
+  const applySuggestion = (s: Record<string, any>, picks: Record<string, boolean>) => {
+    for (const [key, on] of Object.entries(picks)) {
+      if (!on) continue;
+      const v = s[key];
+      if (v === undefined || v === null || v === '') continue;
+      if (key === 'type') { if (TYPE_LABEL[v as ItemType]) set('type', v); continue; }
+      if (key === 'tags') { set('tags', Array.isArray(v) ? v.join(',') : String(v)); continue; }
+      set(key, String(v));
+    }
+    setAiResult(null);
+    toast('建议已填入表单（尚未保存，可继续修改）', 'ok');
+  };
+
+  const runIdentify = async () => {
+    const first = uploaded[0];
+    if (!first) { toast('先添加一张图片再识别', 'err'); return; }
+    setAiBusy('identify');
+    try {
+      const blob = await (await fetch(first.url)).blob();
+      const small = await shrinkForAI(blob);
+      const dataUrl = await blobToDataUrl(small);
+      const res = await api.ai.identify(dataUrl);
+      const s = res.suggestion ?? {};
+      const checks: Record<string, boolean> = {};
+      for (const k of Object.keys(FIELD_LABELS)) checks[k] = !String((form as any)[k] ?? '').trim();
+      setAiChecks(checks);
+      setAiResult({ suggestion: s });
+    } catch (e) { toast((e as Error).message, 'err'); } finally { setAiBusy(null); }
+  };
+
+  const runEnrich = async () => {
+    if (!String(form.name ?? '').trim() && !String(form.series ?? '').trim()) {
+      toast('至少填写名称或系列再联网补全', 'err');
+      return;
+    }
+    setAiBusy('enrich');
+    try {
+      const res = await api.ai.enrich({
+        name: String(form.name ?? ''), series: String(form.series ?? ''),
+        character: String(form.character ?? ''), barcode: String(form.barcode ?? ''),
+      });
+      const s = res.suggestion ?? {};
+      const checks: Record<string, boolean> = {};
+      for (const k of Object.keys(FIELD_LABELS)) checks[k] = !String((form as any)[k] ?? '').trim();
+      setAiChecks(checks);
+      setAiResult({ suggestion: s, sources: res.sources });
+    } catch (e) { toast((e as Error).message, 'err'); } finally { setAiBusy(null); }
+  };
+
+  const previewValue = (key: string) => {
+    const v = aiResult?.suggestion?.[key];
+    if (v === undefined || v === null || v === '') return null;
+    if (key === 'type') return TYPE_LABEL[v as ItemType] ?? String(v);
+    if (key === 'tags') return '#' + (Array.isArray(v) ? v.join(' #') : String(v));
+    return String(v);
+  };
+
   return (
     <Modal open={open} onClose={onClose} title={editing ? '编辑藏品' : '收录新藏品'} wide>
       <form
         className="space-y-4"
         onSubmit={(e) => { e.preventDefault(); save.mutate(); }}
       >
+        {/* AI 助手 */}
+        <div className="rounded-2xl border border-aether-200/60 bg-gradient-to-br from-aether-50/80 to-fuchsia-50/60 p-3.5">
+          <div className="flex items-center gap-1.5 text-xs font-black text-aether-700">
+            <Sparkles size={13} className="text-moe-500" /> AI 助手
+            <span className="ml-auto text-[10px] font-medium text-ink-400">建议仅供参考，应用前由你勾选审核</span>
+          </div>
+          <div className="mt-2.5 flex gap-2">
+            <button
+              type="button" onClick={runIdentify} disabled={aiBusy !== null}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-white/80 px-3 py-2 text-[11px] font-bold text-aether-700 shadow-sm transition hover:bg-white disabled:opacity-50"
+            >
+              {aiBusy === 'identify' ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
+              从图片识别
+            </button>
+            <button
+              type="button" onClick={runEnrich} disabled={aiBusy !== null}
+              className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-white/80 px-3 py-2 text-[11px] font-bold text-aether-700 shadow-sm transition hover:bg-white disabled:opacity-50"
+            >
+              {aiBusy === 'enrich' ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+              联网补全（Bangumi + AI）
+            </button>
+          </div>
+
+          {aiResult && (
+            <div className="mt-3 rounded-xl bg-white/85 p-3">
+              <p className="text-[10px] font-bold text-ink-400">补全建议 · 勾选后应用到表单</p>
+              <div className="mt-2 space-y-1.5">
+                {Object.keys(FIELD_LABELS).map((key) => {
+                  const preview = previewValue(key);
+                  if (!preview) return null;
+                  const checked = !!aiChecks[key];
+                  const current = String((form as any)[key] ?? '').trim();
+                  return (
+                    <label key={key} className="flex cursor-pointer items-center gap-2 rounded-lg px-1.5 py-1 transition hover:bg-aether-50">
+                      <input
+                        type="checkbox" checked={checked}
+                        onChange={(e) => setAiChecks((c) => ({ ...c, [key]: e.target.checked }))}
+                        className="size-3.5 accent-aether-500"
+                      />
+                      <span className="w-14 shrink-0 text-[11px] font-bold text-ink-600">{FIELD_LABELS[key]}</span>
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-ink-400">
+                        {current ? `保留「${current}」` : '（空）'}
+                        <span className="mx-1">→</span>
+                        <b className="text-aether-700">{preview}</b>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+              {aiResult.sources && aiResult.sources.length > 0 && (
+                <p className="mt-2 border-t border-aether-100 pt-2 text-[10px] leading-relaxed text-ink-400">
+                  来源：Bangumi「{(aiResult.sources[0].nameCn || aiResult.sources[0].name).slice(0, 24)}」等 {aiResult.sources.length} 条结果
+                </p>
+              )}
+              <button
+                type="button"
+                onClick={() => applySuggestion(aiResult.suggestion, aiChecks)}
+                className="mt-2.5 flex w-full items-center justify-center gap-1.5 rounded-xl bg-gradient-to-r from-aether-500 to-aether-600 py-2 text-[11px] font-bold text-white shadow-md shadow-aether-500/25"
+              >
+                <Check size={13} /> 应用所选项
+              </button>
+            </div>
+          )}
+        </div>
+
         {/* 图片 */}
         <div>
           <span className="mb-1.5 block text-xs font-semibold text-ink-600">图片 <span className="text-[10px] font-normal text-ink-400">自动压缩为 WebP 并提取主题色</span></span>
@@ -173,4 +305,32 @@ export default function ItemForm({ open, onClose, initial }: { open: boolean; on
       </form>
     </Modal>
   );
+}
+
+/** 识别前压缩图片到 768px 以内的 dataURL，控制 AI 请求体积 */
+async function shrinkForAI(blob: Blob): Promise<Blob> {
+  const bmp = await createImageBitmap(blob);
+  try {
+    const scale = Math.min(1, 768 / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w;
+    canvas.height = h;
+    canvas.getContext('2d')!.drawImage(bmp, 0, 0, w, h);
+    return await new Promise<Blob>((resolve, reject) =>
+      canvas.toBlob((b) => (b ? resolve(b) : reject(new Error('压缩失败'))), 'image/webp', 0.82),
+    );
+  } finally {
+    bmp.close?.();
+  }
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(String(r.result));
+    r.onerror = () => reject(new Error('读取图片失败'));
+    r.readAsDataURL(blob);
+  });
 }

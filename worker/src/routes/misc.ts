@@ -1,11 +1,13 @@
 import { Hono } from 'hono';
 import { one, query, run } from '../db.js';
-import { requireWriteAuth } from '../auth.js';
+import { writeGate } from '../gate.js';
 
 export const miscRoutes = new Hono<{ Bindings: Env }>();
 
 /** 随机对象名（Web Crypto，无需 node:crypto） */
 const randomKey = () => [...crypto.getRandomValues(new Uint8Array(5))].map((b) => b.toString(16).padStart(2, '0')).join('');
+
+miscRoutes.use('/upload', writeGate); // 上传是写操作，走 /api/write/upload 时才放行
 
 const MAX_OBJECT_BYTES = 12 * 1024 * 1024; // 浏览器端已压缩，单图 12MB 上限只是防御
 
@@ -17,7 +19,7 @@ interface UploadMeta {
   palette: string[];
 }
 
-miscRoutes.post('/upload', requireWriteAuth, async (c) => {
+miscRoutes.post('/upload', async (c) => {
   const body = await c.req.parseBody();
   let metas: UploadMeta[];
   try {

@@ -21,8 +21,11 @@
     { "pattern": "akasha.linkium.top", "custom_domain": true }
   ],
   "vars": {
-    "CHAIN_DIFFICULTY": "2",
-    "AUTH_TOKEN": ""
+    "CHAIN_DIFFICULTY": "2"
+  },
+  // Workers AI：图片识别 / 联网补全建议
+  "ai": {
+    "binding": "AI"
   },
   "d1_databases": [
     {

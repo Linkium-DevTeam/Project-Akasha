@@ -1,15 +1,17 @@
 import { Hono } from 'hono';
-import type { ErrorHandler, MiddlewareHandler } from 'hono';
+import type { MiddlewareHandler } from 'hono';
 import { ensureGenesis } from './chain.js';
+import { sessionPage } from './gate.js';
 import { itemsRoutes } from './routes/items.js';
 import { boxesRoutes } from './routes/boxes.js';
 import { miscRoutes, imageRoutes } from './routes/misc.js';
 import { certRoutes, chainRoutes } from './routes/cert.js';
+import { aiRoutes } from './routes/ai.js';
 
 const app = new Hono<{ Bindings: Env }>();
 
 /** 结构化 JSON 请求日志（Workers Logs 可检索） */
-export const jsonLogger: MiddlewareHandler = async (c, next) => {
+const jsonLogger: MiddlewareHandler = async (c, next) => {
   const start = Date.now();
   await next();
   console.log(JSON.stringify({
@@ -21,7 +23,7 @@ export const jsonLogger: MiddlewareHandler = async (c, next) => {
   }));
 };
 
-const onError: ErrorHandler = (err, c) => {
+const onError = (err: Error, c: any) => {
   console.error(JSON.stringify({
     message: 'unhandled error',
     error: err instanceof Error ? err.message : String(err),
@@ -45,12 +47,25 @@ app.use('/api/*', async (c, next) => {
 
 app.get('/api/health', (c) => c.json({ ok: true, service: 'akasha', runtime: 'cloudflare-workers', time: new Date().toISOString() }));
 
-const api = new Hono();
+const api = new Hono<{ Bindings: Env }>();
+
+// 公开读通道
 api.route('/items', itemsRoutes);
 api.route('/boxes', boxesRoutes);
 api.route('/cert', certRoutes);
 api.route('/', chainRoutes);
-api.route('/', miscRoutes); // /api/upload /api/resolve/:code /api/stats
+api.route('/', miscRoutes);
+
+// 写通道：挂载在同一组路由，writeGate 只放行 /api/write/* 前缀；
+// 生产环境该前缀整体由 Cloudflare Access（路径 /api/write*，会话 1 周）在边缘验证
+api.route('/write/items', itemsRoutes);
+api.route('/write/boxes', boxesRoutes);
+api.route('/write', miscRoutes); // /api/write/upload
+api.route('/write/ai', aiRoutes);
+
+// Access 验证完成的回程：能到达这里说明已通过验证，弹回应用
+app.get('/api/write/session', (c) => sessionPage(new URL(c.req.url)));
+
 app.route('/api', api);
 app.route('/', imageRoutes); // /images/:name（R2 直读）
 

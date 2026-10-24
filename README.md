@@ -39,8 +39,13 @@
 | **Aether Lens** | 高斯模糊 HUD 扫码透镜，玻璃拟态界面 | 浏览器摄像头 + ZXing（QR / EAN / UPC / Code128），闪光灯、相册解码、手动盒码 |
 | **Material You** | **动态取色系统**，UI 主题随谷子图片自动变色 | 取色发生在你的浏览器里（canvas 像素量化提取 5 色）—— 边缘零图片算力 |
 | **Parallax Artifact** | 陀螺仪 / 鼠标驱动的 **2.5D 视差** 与流光特效 | framer-motion spring 物理视差 + glare 流光 + 景深徽章 |
+| **Multi-Image** | 藏品多图画廊：左右切换 / 缩略图条 / 卡片 1-N 徽章 | 每张图独立取色，切换时详情页主题随之渐变 |
+| **AI Cutout** | 一键智能抠图 | 浏览器端边缘洪泛 + 自适应容差 + 羽化（零模型下载）；结果作为新图加入，原图保留由你审核 |
+| **AI Assist** | 拍照识别 + 联网补全（**审核后应用**） | Workers AI（llama-3.2-11b-vision / 3.1-8b）识别照片；Bangumi 公开 API 联网搜索 + LLM 整合建议 —— 建议先勾选审核再填入表单，不直接落库 |
+| **Insights** | 数据洞察：类型分布 / 月度趋势 / 系列价值榜 / 状态构成 | 纯本机实时聚合 + 手绘图表，零统计服务、零追踪 |
 | **Chain Cert** | 模拟**区块链哈希**确权，独一无二的可打印数字证书 | SHA-256 哈希链 + PoW，收录/修改/移库/注销全部封存区块，整链可校验；难度随区块记录，边缘与本地互认 |
 | **Soul Bind** | NFC 灵魂绑定 + 盒子隐藏内容 | Web NFC (NDEFReader) 写入盒码传送门；扫码/NFC 抵达自动揭晓盒中密语 |
+| **Access 写入门禁** | 查看完全公开；写入需 Cloudflare Access 验证，**验证一次 7 天免验证** | 变更操作收敛到 `/api/write/*`，由 Cloudflare Access（会话 1 周）在边缘拦截；本地 dev 无 Access 自动放行 |
 | **Edge Optimized** | 全面拥抱 Serverless，白嫖 Cloudflare 免费额度 | 浏览器端 WebP 压缩（1600px 主图 + 640px 缩略图）→ Worker 只存字节；静态资源边缘直出不计费；ZXing 按需分包 |
 
 ## 🔧 Architecture
@@ -99,9 +104,20 @@ npm run deploy             # 构建前端并部署 → https://project-akasha.<�
 
 | 项 | 说明 |
 | :--- | :--- |
-| `vars.AUTH_TOKEN` | 设置后所有写操作需携带 `Authorization: Bearer <token>`（读公开）。生产建议 `wrangler secret put AUTH_TOKEN` |
+| `routes` | 自定义域名（如 `akasha.linkium.top`），deploy 时自动建 DNS + 证书 |
 | `vars.CHAIN_DIFFICULTY` | 哈希链 PoW 难度（默认 2，适配免费版 10ms CPU 限制；难度随区块记录，改了不影响旧块校验） |
-| `d1_databases` / `r2_buckets` | D1 与 R2 绑定 |
+| `ai` | Workers AI 绑定（图片识别 / 补全建议），免费额度每日 neurons 足够个人使用 |
+
+### 启用写入验证（Cloudflare Access，一次性配置）
+
+查看永远公开；要让写入需要验证，在 Cloudflare 控制台创建一次 Access 应用：
+
+1. Zero Trust → **Access → Applications → Add an application → Self-hosted**
+2. 应用域名：`akasha.linkium.top`，路径填 `/api/write`（勾选“匹配该路径下所有请求”）
+3. **Session Duration 选 `1 week`** —— 这就是“验证一次 7 天内免验证”的来源
+4. 添加策略：Include → `Emails` → 填你自己的邮箱（登录方式选 Email OTP 即可，无需身份源）
+
+未配置 Access 应用时 `/api/write/*` 不设防（单人文档模式）；配置后边缘即刻生效。本地 `wrangler dev` 没有 Access，写入直接放行。
 
 免费额度内完全够用：Workers 10 万请求/天、D1 5GB、R2 10GB（零流出费）、静态资源无限量不计费。
 
@@ -112,6 +128,17 @@ npm run deploy             # 构建前端并部署 → https://project-akasha.<�
 3. **寻找**：忘了在哪？打开**透镜**扫盒上二维码，直达盒子；扫商品条形码可检索藏品。
 4. **绑定**：Android Chrome 打开盒子详情 → Soul Bind 写入 NFC 标签，碰一碰直达。
 5. **确权**：藏品详情 → 确权证书，一份带哈希链背书、可打印的数字证书就到手了。
+
+## 💾 备份与恢复
+
+数据是自己的心血，定期备份：
+
+```bash
+npx wrangler d1 export akasha --remote --output backup.sql        # 全库 SQL
+npx wrangler r2 object get akasha-images/<key> --file <key> --remote  # 逐个图片对象
+```
+
+图片对象清单可从 `images` 表（`file`、`thumb` 列）获得。恢复：`wrangler d1 execute akasha --remote --file backup.sql` + 按 key 回传 R2。
 
 ## 📬 Stay Tuned
 

@@ -1,6 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { one, query, run } from '../db.js';
-import { requireWriteAuth } from '../auth.js';
+import { writeGate } from '../gate.js';
 import { createBox, BoxCodeError, type BoxInput } from '../services.js';
 
 export interface BoxRow {
@@ -63,6 +63,9 @@ const parseBoxInput = async (c: Ctx): Promise<BoxInput> => {
 
 export const boxesRoutes = new Hono<{ Bindings: Env }>();
 
+// 写操作只允许经 /api/write/* 通道（受 Cloudflare Access 保护）
+boxesRoutes.use('*', writeGate);
+
 boxesRoutes.get('/', async (c) => {
   const rows = await query<BoxRow>(c.env.DB, 'SELECT * FROM boxes ORDER BY created_at DESC, id DESC');
   const counts = await countsByBoxId(c.env.DB, rows.map((b) => b.id));
@@ -77,7 +80,7 @@ boxesRoutes.get('/:id', async (c) => {
   return c.json({ box: await serializeBox(c.env.DB, box, { reveal, withItems: true }) });
 });
 
-boxesRoutes.post('/', requireWriteAuth, async (c) => {
+boxesRoutes.post('/', async (c) => {
   const input = await parseBoxInput(c);
   if (!input.name) return c.json({ error: '名称不能为空' }, 400);
   try {
@@ -89,7 +92,7 @@ boxesRoutes.post('/', requireWriteAuth, async (c) => {
   }
 });
 
-boxesRoutes.patch('/:id', requireWriteAuth, async (c) => {
+boxesRoutes.patch('/:id', async (c) => {
   const id = Number(c.req.param('id'));
   const input = await parseBoxInput(c);
   if (!input.name) return c.json({ error: '名称不能为空' }, 400);
@@ -100,7 +103,7 @@ boxesRoutes.patch('/:id', requireWriteAuth, async (c) => {
   return c.json({ box: await serializeBox(c.env.DB, (await one<BoxRow>(c.env.DB, 'SELECT * FROM boxes WHERE id = ?', id))!) });
 });
 
-boxesRoutes.delete('/:id', requireWriteAuth, async (c) => {
+boxesRoutes.delete('/:id', async (c) => {
   const { changes } = await run(c.env.DB, 'DELETE FROM boxes WHERE id = ?', Number(c.req.param('id')));
   if (!changes) return c.json({ error: '盒子不存在' }, 404);
   return c.json({ ok: true });
