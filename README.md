@@ -45,7 +45,7 @@
 | **Insights** | 数据洞察：类型分布 / 月度趋势 / 系列价值榜 / 状态构成 | 纯本机实时聚合 + 手绘图表，零统计服务、零追踪 |
 | **Chain Cert** | 模拟**区块链哈希**确权，独一无二的可打印数字证书 | SHA-256 哈希链 + PoW，收录/修改/移库/注销全部封存区块，整链可校验；难度随区块记录，边缘与本地互认 |
 | **Soul Bind** | NFC 灵魂绑定 + 盒子隐藏内容 | Web NFC (NDEFReader) 写入盒码传送门；扫码/NFC 抵达自动揭晓盒中密语 |
-| **Access 写入门禁** | 查看完全公开；写入需 Cloudflare Access 验证，**验证一次 7 天免验证** | 变更操作收敛到 `/api/write/*`，由 Cloudflare Access（会话 1 周）在边缘拦截；本地 dev 无 Access 自动放行 |
+| **Access 写入门禁** | 查看完全公开；写入需 Cloudflare Access 验证，**验证一次 7 天免验证** | 变更操作收敛到 `/api/write/*`，边缘由 Access（会话 1 周）拦截 + Worker 内直接校验 Access JWT（RS256 + aud + exp）双重防线；workers.dev 入口已关闭，本地 dev 无 Access 自动放行 |
 | **Edge Optimized** | 全面拥抱 Serverless，白嫖 Cloudflare 免费额度 | 浏览器端 WebP 压缩（1600px 主图 + 640px 缩略图）→ Worker 只存字节；静态资源边缘直出不计费；ZXing 按需分包 |
 
 ## 🔧 Architecture
@@ -117,7 +117,7 @@ npm run deploy             # 构建前端并部署 → https://project-akasha.<�
 3. **Session Duration 选 `1 week`** —— 这就是“验证一次 7 天内免验证”的来源
 4. 添加策略：Include → `Emails` → 填你自己的邮箱（登录方式选 Email OTP 即可，无需身份源）
 
-未配置 Access 应用时 `/api/write/*` 不设防（单人文档模式）；配置后边缘即刻生效。本地 `wrangler dev` 没有 Access，写入直接放行。
+未配置 Access 应用时写入会同时被 Worker 内的 JWT 校验层拒绝（需按下面方式在 `wrangler.jsonc` 的 `vars` 中填入 `ACCESS_TEAM_DOMAIN` / `ACCESS_AUD`，或将这两项留空进入无门禁的单人文档模式）。本地 `wrangler dev`（localhost）自动跳过 JWT 校验，写入直接放行。**注意：workers.dev 入口已关闭** —— 它不受 Access 保护，留着会绕过写入验证；访问请使用自定义域名。
 
 免费额度内完全够用：Workers 10 万请求/天、D1 5GB、R2 10GB（零流出费）、静态资源无限量不计费。
 

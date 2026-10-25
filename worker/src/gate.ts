@@ -1,7 +1,7 @@
 import type { MiddlewareHandler } from 'hono';
 
 /**
- * 写入门禁：
+ * 写入门禁（第一层）：
  * - 生产环境把所有变更操作放在 /api/write/* 前缀下，由 Cloudflare Access
  *   （应用路径 /api/write*，会话时长设为 1 周）在边缘拦截验证 —— 验证一次后
  *   该设备 7 天内免验证；读操作不受影响。
@@ -12,6 +12,68 @@ export const writeGate: MiddlewareHandler = async (c, next) => {
   if (c.req.method === 'GET' || c.req.method === 'HEAD' || c.req.method === 'OPTIONS') return next();
   if (c.req.path.startsWith('/api/write/')) return next();
   return c.json({ error: '写入请走 /api/write 通道（受 Cloudflare Access 保护）', accessRequired: true }, 403);
+};
+
+/**
+ * 写入门禁（第二层，纵深防御）：直接校验 Cloudflare Access 注入的
+ * Cf-Access-Jwt-Assertion（RS256 签名 + aud + exp）。
+ * 即使有人给 Worker 挂了未经 Access 保护的新域名（如 workers.dev），写入也会在这里被拒。
+ * ACCESS_TEAM_DOMAIN / ACCESS_AUD 未配置或本地 localhost 时跳过（本地开发）。
+ */
+
+interface Jwk { kid: string; kty: string; n: string; e: string; alg?: string; use?: string }
+
+let jwksCache: { keys: Jwk[]; fetchedAt: number } | null = null;
+
+async function getTeamKeys(team: string): Promise<Jwk[]> {
+  if (jwksCache && Date.now() - jwksCache.fetchedAt < 3600_000) return jwksCache.keys;
+  const res = await fetch(`https://${team}/cdn-cgi/access/certs`);
+  if (!res.ok) throw new Error('无法获取 Access 公钥');
+  const data = await res.json<any>();
+  jwksCache = { keys: (data.keys ?? []) as Jwk[], fetchedAt: Date.now() };
+  return jwksCache.keys;
+}
+
+function b64urlBytes(s: string): Uint8Array {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
+  const pad = b64.length % 4 ? '='.repeat(4 - (b64.length % 4)) : '';
+  const bin = atob(b64 + pad);
+  return Uint8Array.from(bin, (ch) => ch.charCodeAt(0));
+}
+
+export async function verifyAccessJwt(token: string, team: string, aud: string): Promise<boolean> {
+  const parts = token.split('.');
+  if (parts.length !== 3) return false;
+  const header = JSON.parse(new TextDecoder().decode(b64urlBytes(parts[0])));
+  const payload = JSON.parse(new TextDecoder().decode(b64urlBytes(parts[1])));
+  if (header.alg !== 'RS256') return false;
+  const audOk = payload.aud === aud || (Array.isArray(payload.aud) && payload.aud.includes(aud));
+  if (!audOk) return false;
+  if (typeof payload.exp === 'number' && payload.exp * 1000 < Date.now()) return false;
+  const keys = await getTeamKeys(team);
+  const jwk = keys.find((k) => k.kid === header.kid);
+  if (!jwk) return false;
+  const key = await crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+  return crypto.subtle.verify('RSASSA-PKCS1-v1_5', key, b64urlBytes(parts[2]), new TextEncoder().encode(`${parts[0]}.${parts[1]}`));
+}
+
+const deny = (c: any, msg: string) => c.json({ error: msg, accessRequired: true }, 403);
+
+export const accessJwtGuard: MiddlewareHandler = async (c, next) => {
+  const team = c.env.ACCESS_TEAM_DOMAIN;
+  const aud = c.env.ACCESS_AUD;
+  const host = new URL(c.req.url).hostname;
+  const isLocal = host === 'localhost' || host === '127.0.0.1' || host === '[::1]';
+  if (!team || !aud || isLocal) return next(); // 本地开发或未配置团队信息时不启用第二层
+
+  const token = c.req.header('Cf-Access-Jwt-Assertion');
+  if (!token) return deny(c, '缺少 Cloudflare Access 凭证');
+  try {
+    if (!(await verifyAccessJwt(token, team, aud))) return deny(c, 'Cloudflare Access 凭证无效');
+  } catch {
+    return deny(c, 'Cloudflare Access 凭证校验失败');
+  }
+  await next();
 };
 
 /**

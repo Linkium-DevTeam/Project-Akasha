@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { MiddlewareHandler } from 'hono';
 import { ensureGenesis } from './chain.js';
-import { sessionPage } from './gate.js';
+import { sessionPage, accessJwtGuard } from './gate.js';
 import { itemsRoutes } from './routes/items.js';
 import { boxesRoutes } from './routes/boxes.js';
 import { miscRoutes, imageRoutes } from './routes/misc.js';
@@ -57,14 +57,17 @@ api.route('/', chainRoutes);
 api.route('/', miscRoutes);
 
 // 写通道：挂载在同一组路由，writeGate 只放行 /api/write/* 前缀；
-// 生产环境该前缀整体由 Cloudflare Access（路径 /api/write*，会话 1 周）在边缘验证
+// 生产环境该前缀整体由 Cloudflare Access（路径 /api/write*，会话 1 周）在边缘验证，
+// 并由 accessJwtGuard 直接校验 Access 注入的 JWT（纵深防御：任何未经 Access
+// 保护的入口 —— 例如误开的其他域名 —— 写入都会在这里被拒）
+api.use('/write/*', accessJwtGuard);
 api.route('/write/items', itemsRoutes);
 api.route('/write/boxes', boxesRoutes);
-api.route('/write', miscRoutes); // /api/write/upload
+api.route('/write', miscRoutes); // /api/write/upload /api/write/ai 之前的通用挂载
 api.route('/write/ai', aiRoutes);
 
-// Access 验证完成的回程：能到达这里说明已通过验证，弹回应用
-app.get('/api/write/session', (c) => sessionPage(new URL(c.req.url)));
+// Access 验证完成的回程：能到达这里说明已通过验证（同样受 JWT 校验保护）
+app.get('/api/write/session', accessJwtGuard, (c) => sessionPage(new URL(c.req.url)));
 
 app.route('/api', api);
 app.route('/', imageRoutes); // /images/:name（R2 直读）

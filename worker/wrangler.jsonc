@@ -3,8 +3,9 @@
   "name": "project-akasha",
   "main": "src/index.ts",
   "compatibility_date": "2026-10-08",
-  // 保留 workers.dev 作为备用入口（配 routes 后默认会被禁用）
-  "workers_dev": true,
+  // 关闭 workers.dev 入口：Access 应用只保护自定义域名，
+  // 保留 workers.dev 会形成绕过写入验证的旁路
+  "workers_dev": false,
   "observability": {
     "enabled": true,
     "logs": { "enabled": true, "head_sampling_rate": 1, "invocation_logs": true },
@@ -21,7 +22,10 @@
     { "pattern": "akasha.linkium.top", "custom_domain": true }
   ],
   "vars": {
-    "CHAIN_DIFFICULTY": "2"
+    "CHAIN_DIFFICULTY": "2",
+    // Worker 端 Access JWT 校验（纵深防御）：从 Access 登录 URL / 控制台获取
+    "ACCESS_TEAM_DOMAIN": "linkiumdevteam.cloudflareaccess.com",
+    "ACCESS_AUD": "a51d1a1eb9b6c55b46349a972c5a1446e2dbc7865e1d19e0ec6d17479507f507"
   },
   // Workers AI：图片识别 / 联网补全建议
   "ai": {
