@@ -30,6 +30,12 @@ export default function ItemForm({ open, onClose, initial }: { open: boolean; on
   const [aiBusy, setAiBusy] = useState<'identify' | 'enrich' | null>(null);
   const [aiResult, setAiResult] = useState<{ suggestion: Record<string, any>; sources?: Array<{ name: string; nameCn: string; date: string; summary: string }> } | null>(null);
   const [aiChecks, setAiChecks] = useState<Record<string, boolean>>({});
+  const [needAccess, setNeedAccess] = useState(false);
+
+  useEffect(() => {
+    // check() 返回 true = 已验证；needAccess 语义相反
+    if (open) api.access.check().then((ok) => setNeedAccess(!ok));
+  }, [open]);
 
   useEffect(() => {
     if (open) {
@@ -143,6 +149,21 @@ export default function ItemForm({ open, onClose, initial }: { open: boolean; on
         className="space-y-4"
         onSubmit={(e) => { e.preventDefault(); save.mutate(); }}
       >
+        {needAccess && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-3.5">
+            <p className="text-xs font-bold text-amber-700">🔒 写入需要先通过 Cloudflare Access 验证</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-amber-600/80">
+              验证一次后这台设备 7 天内免验证。点击下方按钮完成验证后自动返回（表单内容不会自动保留，建议验证后再填写）。
+            </p>
+            <button
+              type="button"
+              onClick={() => api.access.start()}
+              className="mt-2 w-full rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 py-2 text-xs font-bold text-white shadow-md"
+            >
+              通过 Cloudflare Access 验证
+            </button>
+          </div>
+        )}
         {/* AI 助手 */}
         <div className="rounded-2xl border border-aether-200/60 bg-gradient-to-br from-aether-50/80 to-fuchsia-50/60 p-3.5">
           <div className="flex items-center gap-1.5 text-xs font-black text-aether-700">
@@ -297,10 +318,10 @@ export default function ItemForm({ open, onClose, initial }: { open: boolean; on
         </Field>
 
         <button
-          type="submit" disabled={save.isPending || uploading}
+          type="submit" disabled={save.isPending || uploading || needAccess}
           className="w-full rounded-xl bg-gradient-to-r from-aether-500 to-aether-600 py-2.5 text-sm font-bold text-white shadow-lg shadow-aether-500/30 transition hover:brightness-110 disabled:opacity-50"
         >
-          {save.isPending ? '保存中…' : editing ? '保存修改' : '登记入册'}
+          {save.isPending ? '保存中…' : needAccess ? '（先完成上方验证）' : editing ? '保存修改' : '登记入册'}
         </button>
       </form>
     </Modal>

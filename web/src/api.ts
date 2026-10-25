@@ -32,19 +32,37 @@ export class ApiError extends Error {
   }
 }
 
+function signalAccessRequired() {
+  window.dispatchEvent(new Event('akasha:access'));
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json');
+  const isWrite = path.startsWith('/api/write/');
 
-  const res = await fetch(path, { ...init, headers });
-  // Cloudflare Access 会把未验证的 /api/write/* 请求 302 到登录页（fetch 跟随后拿到 HTML）
+  let res: Response;
+  try {
+    // 写通道不跟随重定向：未验证时 Cloudflare Access 会 302 到登录页，
+    // redirect:'manual' 让我们拿到 opaqueredirect，从而精确识别「需要验证」
+    // （跟随跳转会跨域撞 CORS，只会得到无信息量的网络错误）
+    res = await fetch(path, { ...init, headers, redirect: isWrite ? 'manual' : 'follow' });
+  } catch {
+    if (isWrite) { signalAccessRequired(); throw new ApiError(401, '需要通过 Cloudflare Access 验证写入', true); }
+    throw new ApiError(0, '网络请求失败');
+  }
+  if (isWrite && res.type === 'opaqueredirect') {
+    signalAccessRequired();
+    throw new ApiError(401, '需要通过 Cloudflare Access 验证写入', true);
+  }
+
   const contentType = res.headers.get('content-type') ?? '';
   if (!res.ok) {
     if (res.status === 403 || res.status === 401) {
       let data: any = null;
       try { data = await res.json(); } catch { /* 非 JSON */ }
       if (data?.accessRequired || res.status === 401) {
-        window.dispatchEvent(new Event('akasha:access'));
+        signalAccessRequired();
         throw new ApiError(res.status, data?.error ?? '需要通过 Cloudflare Access 验证写入', true);
       }
     }
@@ -54,7 +72,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (contentType.includes('text/html')) {
     // 写入请求被 Access 重定向到了登录页 —— 引导用户完成验证
-    window.dispatchEvent(new Event('akasha:access'));
+    signalAccessRequired();
     throw new ApiError(401, '需要通过 Cloudflare Access 验证写入', true);
   }
   let data: any = null;
@@ -64,6 +82,23 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  /** 写入会话探测：true = 本设备已通过 Access 验证（7 天内），可放心填写提交 */
+  access: {
+    check: async (): Promise<boolean> => {
+      try {
+        const res = await fetch('/api/write/session?probe=1', { redirect: 'manual', cache: 'no-store' });
+        return res.type !== 'opaqueredirect';
+      } catch {
+        return false;
+      }
+    },
+    /** 跳转 Access 验证；验证完成后回程页会带 returnTo 弹回当前页面 */
+    start: () => {
+      const returnTo = encodeURIComponent(location.pathname + location.search);
+      location.href = `/api/write/session?returnTo=${returnTo}`;
+    },
+  },
+
   stats: () => req<Stats>('/api/stats'),
 
   items: {

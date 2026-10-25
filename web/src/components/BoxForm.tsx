@@ -10,10 +10,13 @@ export default function BoxForm({ open, onClose, initial }: { open: boolean; onC
   const editing = !!initial?.id;
   const qc = useQueryClient();
   const toast = useToast();
+  const [needAccess, setNeedAccess] = useState(false);
   const [form, setForm] = useState({ code: '', name: '', location: '', capacity: 24, color: COLORS[0], secret: '' });
 
   useEffect(() => {
     if (open) {
+      // check() 返回 true = 已验证；needAccess 语义相反
+      api.access.check().then((ok) => setNeedAccess(!ok));
       setForm(initial
         ? { code: initial.code, name: initial.name, location: initial.location, capacity: initial.capacity, color: initial.color || COLORS[0], secret: initial.secret ?? '' }
         : { code: '', name: '', location: '', capacity: 24, color: COLORS[Math.floor(Math.random() * COLORS.length)], secret: '' });
@@ -40,6 +43,19 @@ export default function BoxForm({ open, onClose, initial }: { open: boolean; onC
   return (
     <Modal open={open} onClose={onClose} title={editing ? '编辑收纳盒' : '新的收纳盒'}>
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); save.mutate(); }}>
+        {needAccess && (
+          <div className="rounded-2xl border border-amber-200 bg-amber-50/80 p-3.5">
+            <p className="text-xs font-bold text-amber-700">🔒 写入需要先通过 Cloudflare Access 验证</p>
+            <p className="mt-1 text-[11px] leading-relaxed text-amber-600/80">验证一次，7 天内免验证。完成后自动返回。</p>
+            <button
+              type="button"
+              onClick={() => api.access.start()}
+              className="mt-2 w-full rounded-xl bg-gradient-to-r from-amber-400 to-orange-500 py-2 text-xs font-bold text-white shadow-md"
+            >
+              通过 Cloudflare Access 验证
+            </button>
+          </div>
+        )}
         <Field label="名称 *">
           <input required autoFocus className={inputCls} value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="例：吧唧专列一号" />
         </Field>
@@ -84,10 +100,10 @@ export default function BoxForm({ open, onClose, initial }: { open: boolean; onC
           <input className={inputCls} value={form.secret} onChange={(e) => set('secret', e.target.value)} placeholder="写一句给未来自己的话…" />
         </Field>
         <button
-          type="submit" disabled={save.isPending}
+          type="submit" disabled={save.isPending || needAccess}
           className="w-full rounded-xl bg-gradient-to-r from-aether-500 to-aether-600 py-2.5 text-sm font-bold text-white shadow-lg shadow-aether-500/30 transition hover:brightness-110 disabled:opacity-50"
         >
-          {save.isPending ? '保存中…' : editing ? '保存修改' : '创建盒子'}
+          {save.isPending ? '保存中…' : needAccess ? '（先完成上方验证）' : editing ? '保存修改' : '创建盒子'}
         </button>
       </form>
     </Modal>

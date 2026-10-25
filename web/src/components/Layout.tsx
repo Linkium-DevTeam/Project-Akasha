@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Boxes, ChartPie, Gem, LockKeyhole, ScanLine, ScrollText } from 'lucide-react';
 import { Modal, useToast } from './ui';
+import { api } from '../api';
 
 const NAV = [
   { to: '/', label: '藏品馆', icon: Gem, end: true },
@@ -22,10 +23,7 @@ function AccessModal({ open, onClose }: { open: boolean; onClose: () => void }) 
           验证一次后，这台设备 <b>7 天内</b>免验证写入。
         </p>
         <button
-          onClick={() => {
-            const returnTo = encodeURIComponent(location.pathname + location.search);
-            location.href = `/api/write/session?returnTo=${returnTo}`;
-          }}
+          onClick={() => api.access.start()}
           className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-aether-500 to-aether-600 py-2.5 text-sm font-bold text-white shadow-lg shadow-aether-500/30 transition hover:brightness-110"
         >
           <LockKeyhole size={15} /> 通过 Cloudflare Access 验证
