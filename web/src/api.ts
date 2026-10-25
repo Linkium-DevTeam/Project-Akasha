@@ -36,6 +36,13 @@ function signalAccessRequired() {
   window.dispatchEvent(new Event('akasha:access'));
 }
 
+/** 同源守卫：API 请求永远只允许打到部署源本身（防路径参数被滥用为任意外域请求） */
+function sameOriginUrl(path: string): string {
+  const url = new URL(path, location.origin);
+  if (url.origin !== location.origin) throw new ApiError(400, '仅允许同源 API 请求');
+  return url.toString();
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   if (init?.body && !(init.body instanceof FormData)) headers.set('Content-Type', 'application/json');
@@ -46,8 +53,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     // 写通道不跟随重定向：未验证时 Cloudflare Access 会 302 到登录页，
     // redirect:'manual' 让我们拿到 opaqueredirect，从而精确识别「需要验证」
     // （跟随跳转会跨域撞 CORS，只会得到无信息量的网络错误）
-    res = await fetch(path, { ...init, headers, redirect: isWrite ? 'manual' : 'follow' });
-  } catch {
+    res = await fetch(sameOriginUrl(path), { ...init, headers, redirect: isWrite ? 'manual' : 'follow' });
+  } catch (e) {
+    if (e instanceof ApiError) throw e;
     if (isWrite) { signalAccessRequired(); throw new ApiError(401, '需要通过 Cloudflare Access 验证写入', true); }
     throw new ApiError(0, '网络请求失败');
   }
