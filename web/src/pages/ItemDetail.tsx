@@ -3,9 +3,9 @@ import type React from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AnimatePresence } from 'framer-motion';
-import { BadgeCheck, Boxes, ChevronLeft, ChevronRight, Gem, MapPin, Pencil, Package, Scissors, ScrollText, Trash2 } from 'lucide-react';
+import { BadgeCheck, Boxes, ChevronLeft, ChevronRight, Gem, LockKeyhole, MapPin, Pencil, Package, Scissors, ScrollText, Trash2 } from 'lucide-react';
 import { api } from '../api';
-import { fmtDate, fmtMoney, fmtTime, shortHash } from '../hooks';
+import { fmtDate, fmtMoney, fmtTime, shortHash, useVerified } from '../hooks';
 import { ACTION_LABEL, CONDITION_LABEL, STATUS_LABEL, TYPE_LABEL } from '../types';
 import ParallaxImage from '../components/ParallaxImage';
 import ItemForm, { type ItemFormInitial } from '../components/ItemForm';
@@ -21,6 +21,7 @@ export default function ItemDetail() {
   const [active, setActive] = useState(0);
 
   const query = useQuery({ queryKey: ['item', id], queryFn: () => api.items.get(id!) });
+  const { verified } = useVerified();
 
   const remove = useMutation({
     mutationFn: () => api.items.remove(Number(id)),
@@ -74,15 +75,27 @@ export default function ItemDetail() {
           >
             <BadgeCheck size={14} /> 确权证书
           </Link>
-          <button onClick={() => setFormOpen(true)} className="glass flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold text-ink-600 transition hover:text-aether-700">
-            <Pencil size={14} /> 编辑
-          </button>
-          <button
-            onClick={() => { if (confirm(`确定注销「${item.name}」？此操作会写入链上 RETIRE 区块。`)) remove.mutate(); }}
-            className="glass flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold text-rose-400 transition hover:text-rose-500"
-          >
-            <Trash2 size={14} />
-          </button>
+          {verified ? (
+            <>
+              <button onClick={() => setFormOpen(true)} className="glass flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold text-ink-600 transition hover:text-aether-700">
+                <Pencil size={14} /> 编辑
+              </button>
+              <button
+                onClick={() => { if (confirm(`确定注销「${item.name}」？此操作会写入链上 RETIRE 区块。`)) remove.mutate(); }}
+                className="glass flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold text-rose-400 transition hover:text-rose-500"
+              >
+                <Trash2 size={14} />
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => window.dispatchEvent(new Event('akasha:access'))}
+              title="通过 Cloudflare Access 验证后可编辑 / 删除"
+              className="glass flex items-center gap-1.5 rounded-full px-3.5 py-2 text-xs font-bold text-ink-400 transition hover:text-aether-700"
+            >
+              <LockKeyhole size={13} /> 验证后可编辑
+            </button>
+          )}
         </div>
       </div>
 

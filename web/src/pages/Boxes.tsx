@@ -5,6 +5,7 @@ import { Link } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import { motion } from 'framer-motion';
 import { api } from '../api';
+import { useVerified } from '../hooks';
 import type { Box } from '../types';
 import BoxForm from '../components/BoxForm';
 import { EmptyState, Spinner, useToast } from '../components/ui';
@@ -14,6 +15,7 @@ export default function Boxes() {
   const toast = useToast();
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Box | undefined>();
+  const { verified } = useVerified();
 
   const query = useQuery({ queryKey: ['boxes'], queryFn: api.boxes.list });
 
@@ -84,18 +86,22 @@ export default function Boxes() {
                   </div>
                 </Link>
                 <div className="flex justify-end gap-2 px-5 pb-4">
-                  <button
-                    onClick={() => setEditing(box)}
-                    className="rounded-lg px-2.5 py-1 text-[11px] font-bold text-ink-400 transition hover:bg-white/60 hover:text-aether-700"
-                  >
-                    编辑
-                  </button>
-                  <button
-                    onClick={() => { if (confirm(`删除「${box.name}」？盒内藏品将变为未入盒状态。`)) remove.mutate(box.id); }}
-                    className="rounded-lg px-2.5 py-1 text-[11px] font-bold text-ink-400 transition hover:bg-rose-50 hover:text-rose-500"
-                  >
-                    删除
-                  </button>
+                  {verified && (
+                    <>
+                      <button
+                        onClick={() => setEditing(box)}
+                        className="rounded-lg px-2.5 py-1 text-[11px] font-bold text-ink-400 transition hover:bg-white/60 hover:text-aether-700"
+                      >
+                        编辑
+                      </button>
+                      <button
+                        onClick={() => { if (confirm(`删除「${box.name}」？盒内藏品将变为未入盒状态。`)) remove.mutate(box.id); }}
+                        className="rounded-lg px-2.5 py-1 text-[11px] font-bold text-ink-400 transition hover:bg-rose-50 hover:text-rose-500"
+                      >
+                        删除
+                      </button>
+                    </>
+                  )}
                 </div>
               </motion.div>
             );

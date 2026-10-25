@@ -5,6 +5,7 @@ import QRCode from 'qrcode';
 import { AnimatePresence } from 'framer-motion';
 import { Copy, MapPin, Nfc, Plus, QrCode, ShieldQuestion, Sparkles } from 'lucide-react';
 import { api } from '../api';
+import { useVerified } from '../hooks';
 import { useToast } from '../components/ui';
 import { Spinner, Tag } from '../components/ui';
 import ItemCard from '../components/ItemCard';
@@ -30,6 +31,7 @@ export default function BoxDetail() {
     queryKey: ['box', id, scanned],
     queryFn: () => api.boxes.get(id!, scanned),
   });
+  const { verified } = useVerified();
   const box = query.data?.box;
 
   const items = useQuery({
@@ -79,7 +81,9 @@ export default function BoxDetail() {
     <div className="space-y-5" style={{ '--accent': box.color } as React.CSSProperties}>
       <div className="flex items-center justify-between">
         <button onClick={() => navigate('/boxes')} className="glass rounded-full px-3.5 py-2 text-xs font-bold text-ink-600 transition hover:text-aether-700">← 收纳盒</button>
-        <button onClick={() => setBoxFormOpen(true)} className="glass rounded-full px-3.5 py-2 text-xs font-bold text-ink-600 transition hover:text-aether-700">编辑盒子</button>
+        {verified && (
+          <button onClick={() => setBoxFormOpen(true)} className="glass rounded-full px-3.5 py-2 text-xs font-bold text-ink-600 transition hover:text-aether-700">编辑盒子</button>
+        )}
       </div>
 
       {/* 盒头 */}

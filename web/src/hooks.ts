@@ -1,4 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { api } from './api';
+
+/** 当前设备是否已通过 Cloudflare Access 写入验证（7 天会话内） */
+export function useVerified() {
+  const q = useQuery({
+    queryKey: ['access-verified'],
+    queryFn: () => api.access.check(),
+    staleTime: 60_000,
+    retry: false,
+  });
+  return { verified: q.data === true, checking: q.isPending };
+}
 
 /** 输入防抖 */
 export function useDebounced<T>(value: T, delay = 300): T {
